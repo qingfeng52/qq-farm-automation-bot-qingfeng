@@ -125,6 +125,9 @@ const DEFAULT_ACCOUNT_CONFIG = {
         land_upgrade: false, // 是否自动升级土地
         friend: true,       // 好友互动总开关
         friend_help_exp_limit: true, // 帮忙经验达上限后自动停止帮忙
+        friend_auto_accept: true, // 自动处理微信好友申请
+        friend_request_min_level: 0, // 好友申请最低等级，0=不限制
+        friend_request_reject_below_level: false, // 不符合最低等级时自动拒绝
         friend_steal: true, // 偷菜
         friend_help: true,  // 帮忙
         friend_bad: false,  // 捣乱(放虫草)
@@ -377,6 +380,8 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
                 cfg.automation[k] = normalizeFertilizerLandTypes(v, cfg.automation[k]);
             } else if (k === 'fertilizer_smart_seconds') {
                 cfg.automation[k] = Math.max(30, Math.min(3600, Number(v) || 300));
+            } else if (k === 'friend_request_min_level') {
+                cfg.automation[k] = Math.max(0, Math.min(999, Number.parseInt(v, 10) || 0));
             } else {
                 cfg.automation[k] = !!v;
             }
@@ -758,6 +763,8 @@ function applyConfigSnapshot(snapshot, options = {}) {
                 next.automation[k] = normalizeFertilizerLandTypes(v, next.automation[k]);
             } else if (k === 'fertilizer_smart_seconds') {
                 next.automation[k] = Math.max(30, Math.min(3600, Number(v) || 300));
+            } else if (k === 'friend_request_min_level') {
+                next.automation[k] = Math.max(0, Math.min(999, Number.parseInt(v, 10) || 0));
             } else {
                 next.automation[k] = !!v;
             }

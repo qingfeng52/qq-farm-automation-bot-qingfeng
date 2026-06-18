@@ -537,6 +537,9 @@ const localAutomationSettings = ref({
     friend_help: false,
     friend_bad: false,
     friend_help_exp_limit: false,
+    friend_auto_accept: true,
+    friend_request_min_level: 0,
+    friend_request_reject_below_level: false,
     fertilizer_gift: false,
     fertilizer_buy_organic: false,
     fertilizer_buy_normal: false,
@@ -575,6 +578,9 @@ function syncLocalAutomationSettings() {
         friend_help: false,
         friend_bad: false,
         friend_help_exp_limit: false,
+        friend_auto_accept: true,
+        friend_request_min_level: 0,
+        friend_request_reject_below_level: false,
         fertilizer_gift: false,
         fertilizer_buy_organic: false,
         fertilizer_buy_normal: false,
@@ -597,6 +603,9 @@ function syncLocalAutomationSettings() {
         friend_help: false,
         friend_bad: false,
         friend_help_exp_limit: false,
+        friend_auto_accept: true,
+        friend_request_min_level: 0,
+        friend_request_reject_below_level: false,
         fertilizer_gift: false,
         fertilizer_buy_organic: false,
         fertilizer_buy_normal: false,
@@ -1424,6 +1433,26 @@ async function handleTestOffline() {
               <BaseSwitch v-model="localAutomationSettings.automation.friend_help" label="自动帮忙" />
               <BaseSwitch v-model="localAutomationSettings.automation.friend_bad" label="自动捣乱" />
               <BaseSwitch v-model="localAutomationSettings.automation.friend_help_exp_limit" label="经验满不帮忙" />
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 rounded bg-blue-50 p-3 text-sm dark:bg-blue-900/20 md:grid-cols-3">
+              <BaseSwitch
+                v-model="localAutomationSettings.automation.friend_auto_accept"
+                label="自动处理好友申请"
+              />
+              <BaseInput
+                v-model.number="localAutomationSettings.automation.friend_request_min_level"
+                label="申请最低等级"
+                type="number"
+                min="0"
+                max="999"
+                :disabled="!localAutomationSettings.automation.friend_auto_accept"
+              />
+              <BaseSwitch
+                v-model="localAutomationSettings.automation.friend_request_reject_below_level"
+                label="低等级自动拒绝"
+                :disabled="!localAutomationSettings.automation.friend_auto_accept"
+              />
             </div>
 
             <div class="space-y-3">

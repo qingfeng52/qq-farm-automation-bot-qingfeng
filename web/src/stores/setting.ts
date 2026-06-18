@@ -16,6 +16,9 @@ export interface AutomationConfig {
   friend_steal?: boolean
   friend_help?: boolean
   friend_bad?: boolean
+  friend_auto_accept?: boolean
+  friend_request_min_level?: number
+  friend_request_reject_below_level?: boolean
 }
 
 export interface IntervalsConfig {

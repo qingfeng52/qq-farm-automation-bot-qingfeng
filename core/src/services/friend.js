@@ -6,6 +6,7 @@ const { CONFIG, PlantPhase, PHASE_NAMES } = require('../config/config');
 const { getPlantName, getPlantById, getSeedImageBySeedId, getPlantGrowTime } = require('../config/gameConfig');
 const { parentPort } = require('node:worker_threads');
 const {
+    getAutomation,
     isAutomationOn,
     getFriendQuietHours,
     getFriendBlacklist,
@@ -489,12 +490,26 @@ async function getAllFriends(forceSync = false) {
     return types.GetAllFriendsReply.decode(replyBody);
 }
 
+async function getApplications() {
+    const body = types.GetApplicationsRequest.encode(types.GetApplicationsRequest.create({})).finish();
+    const { body: replyBody } = await sendMsgAsync('gamepb.friendpb.FriendService', 'GetApplications', body);
+    return types.GetApplicationsReply.decode(replyBody);
+}
+
 async function acceptFriends(gids) {
     const body = types.AcceptFriendsRequest.encode(types.AcceptFriendsRequest.create({
         friend_gids: gids.map(g => toLong(g)),
     })).finish();
     const { body: replyBody } = await sendMsgAsync('gamepb.friendpb.FriendService', 'AcceptFriends', body);
     return types.AcceptFriendsReply.decode(replyBody);
+}
+
+async function rejectFriends(gids) {
+    const body = types.RejectFriendsRequest.encode(types.RejectFriendsRequest.create({
+        friend_gids: gids.map(g => toLong(g)),
+    })).finish();
+    const { body: replyBody } = await sendMsgAsync('gamepb.friendpb.FriendService', 'RejectFriends', body);
+    return types.RejectFriendsReply.decode(replyBody);
 }
 
 async function enterFriendFarm(friendGid) {
@@ -1801,9 +1816,9 @@ function onFriendApplicationReceived(applications) {
     const names = applications.map(a => a.name || `GID:${toNum(a.gid)}`).join(', ');
     log('申请', `收到 ${applications.length} 个好友申请: ${names}`);
 
-    // 自动同意
-    const gids = applications.map(a => toNum(a.gid));
-    acceptFriendsWithRetry(gids);
+    handleFriendApplications(applications).catch((e) => {
+        logWarn('申请', `自动处理好友申请失败: ${e.message}`);
+    });
 }
 
 /**
@@ -1818,10 +1833,46 @@ async function checkAndAcceptApplications() {
         const names = applications.map(a => a.name || `GID:${toNum(a.gid)}`).join(', ');
         log('申请', `发现 ${applications.length} 个待处理申请: ${names}`);
 
-        const gids = applications.map(a => toNum(a.gid));
-        await acceptFriendsWithRetry(gids);
+        await handleFriendApplications(applications);
     } catch {
         // 静默失败，可能是 QQ 平台不支持
+    }
+}
+
+async function handleFriendApplications(applications) {
+    const list = Array.isArray(applications) ? applications : [];
+    if (list.length === 0) return;
+
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
+    const automation = getAutomation(accountId) || {};
+    if (automation.friend_auto_accept === false) {
+        log('申请', `已关闭自动处理好友申请，跳过 ${list.length} 个申请`);
+        return;
+    }
+
+    const minLevel = Math.max(0, Math.min(999, Number.parseInt(automation.friend_request_min_level, 10) || 0));
+    const rejectBelowLevel = !!automation.friend_request_reject_below_level;
+    const acceptGids = [];
+    const rejectGids = [];
+    const pendingNames = [];
+
+    for (const app of list) {
+        const gid = toNum(app.gid);
+        if (!gid) continue;
+        const level = toNum(app.level);
+        if (minLevel <= 0 || level >= minLevel) {
+            acceptGids.push(gid);
+        } else if (rejectBelowLevel) {
+            rejectGids.push(gid);
+        } else {
+            pendingNames.push(`${app.name || `GID:${gid}`}(Lv.${level})`);
+        }
+    }
+
+    await acceptFriendsWithRetry(acceptGids);
+    await rejectFriendsWithRetry(rejectGids, minLevel);
+    if (pendingNames.length > 0) {
+        log('申请', `保留 ${pendingNames.length} 个低于 ${minLevel} 级的好友申请: ${pendingNames.join(', ')}`);
     }
 }
 
@@ -1839,6 +1890,16 @@ async function acceptFriendsWithRetry(gids) {
         }
     } catch (e) {
         logWarn('申请', `同意失败: ${e.message}`);
+    }
+}
+
+async function rejectFriendsWithRetry(gids, minLevel) {
+    if (gids.length === 0) return;
+    try {
+        await rejectFriends(gids);
+        log('申请', `已拒绝 ${gids.length} 个低于 ${minLevel} 级的好友申请`);
+    } catch (e) {
+        logWarn('申请', `拒绝失败: ${e.message}`);
     }
 }
 
