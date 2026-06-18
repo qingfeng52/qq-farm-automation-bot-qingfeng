@@ -2393,17 +2393,15 @@ function startAdminServer(dataProvider) {
         const apiKey = req.headers['x-proxy-api-key'] || process.env.WX_PROXY_API_KEY || '';
         const appId = req.headers['x-proxy-app-id'] || process.env.WX_PROXY_APP_ID || 'wx5306c5978fdb76e4';
 
-        if (!apiKey) {
-            return res.status(400).json({ code: -1, msg: '缺少 API Key' });
-        }
-
         // 如果是 jslogin 动作，自动添加 appid
         if (action === 'jslogin') {
             params.appid = appId;
         }
 
         try {
-            const url = `${apiUrl}?api_key=${encodeURIComponent(apiKey)}&action=${action}`;
+            const sep = String(apiUrl).includes('?') ? '&' : '?';
+            const keyPart = apiKey ? `api_key=${encodeURIComponent(apiKey)}&` : '';
+            const url = `${apiUrl}${sep}${keyPart}action=${encodeURIComponent(action)}`;
             adminLogger.info('proxy request', { action, apiUrl });
 
             const response = await fetch(url, {

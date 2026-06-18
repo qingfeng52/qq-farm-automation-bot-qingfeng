@@ -77,9 +77,6 @@ export const useWxLoginStore = defineStore('wx-login', () => {
   const statusMessage = ref('')
   const errorMessage = ref('')
 
-  // 获取二维码接口地址
-  const qrEndpoint = 'LoginGetQRCar'
-
   // 重置登录状态
   function resetState() {
     qrCode.value = null
@@ -90,8 +87,8 @@ export const useWxLoginStore = defineStore('wx-login', () => {
     errorMessage.value = ''
   }
 
-  // 判断是否需要使用代理模式（api_key 不为空）
-  const useProxyMode = computed(() => !!config.value.apiKey)
+  // 微信扫码统一走后端代理，避免浏览器直连本机 API 的跨域/网络上下文问题。
+  const useProxyMode = computed(() => true)
 
   // 获取代理API URL（确保有默认值）
   const proxyApiUrl = computed(() => config.value.proxyApiUrl || defaultConfig.proxyApiUrl)
@@ -106,39 +103,28 @@ export const useWxLoginStore = defineStore('wx-login', () => {
     try {
       let data: any
 
-      if (useProxyMode.value) {
-        // 使用代理模式（vxcode 逻辑）- 请求本地后端代理接口
-        const response = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-proxy-api-key': config.value.apiKey,
-            'x-proxy-api-url': proxyApiUrl.value,
+      // 使用后端代理转发到扫码 API。
+      const response = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-proxy-api-key': config.value.apiKey,
+          'x-proxy-api-url': proxyApiUrl.value,
+        },
+        body: JSON.stringify({ action: 'getqr' }),
+      })
+      const result = await response.json()
+      if (result.code === 0 && result.data) {
+        data = {
+          Success: true,
+          Data: {
+            Uuid: result.data.Uuid,
+            QrBase64: result.data.QrBase64,
           },
-          body: JSON.stringify({ action: 'getqr' }),
-        })
-        const result = await response.json()
-        if (result.code === 0 && result.data) {
-          data = {
-            Success: true,
-            Data: {
-              Uuid: result.data.Uuid,
-              QrBase64: result.data.QrBase64,
-            },
-          }
-        }
-        else {
-          data = { Success: false, Message: result.msg || '获取二维码失败' }
         }
       }
       else {
-        // 使用本地 API 模式（原有逻辑）
-        const response = await fetch(`${config.value.apiBase}/Login/${qrEndpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: '{}',
-        })
-        data = await response.json()
+        data = { Success: false, Message: result.msg || '获取二维码失败' }
       }
 
       if (data.Success && data.Data) {
@@ -176,54 +162,44 @@ export const useWxLoginStore = defineStore('wx-login', () => {
     try {
       let data: any
 
-      if (useProxyMode.value) {
-        // 使用代理模式（vxcode 逻辑）- 请求本地后端代理接口
-        const response = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-proxy-api-key': config.value.apiKey,
-            'x-proxy-api-url': proxyApiUrl.value,
-          },
-          body: JSON.stringify({ action: 'checkqr', uuid: uuid.value }),
-        })
-        const result = await response.json()
-        // 尝试从不同字段获取wxid
-        const wxid = result.data?.wxid || result.data?.Wxid || result.data?.userName || ''
-        const nickname = result.data?.nickname || result.data?.Nickname || result.data?.nickName || '微信用户'
+      const response = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-proxy-api-key': config.value.apiKey,
+          'x-proxy-api-url': proxyApiUrl.value,
+        },
+        body: JSON.stringify({ action: 'checkqr', uuid: uuid.value }),
+      })
+      const result = await response.json()
+      // 尝试从不同字段获取wxid
+      const wxid = result.data?.wxid || result.data?.Wxid || result.data?.userName || ''
+      const nickname = result.data?.nickname || result.data?.Nickname || result.data?.nickName || '微信用户'
 
-        if (result.code === 0 && wxid) {
-          // 真正登录成功（有wxid）
-          data = {
-            Success: true,
-            Data: {
-              acctSectResp: {
-                userName: wxid,
-                nickName: nickname,
-              },
+      if (result.code === 0 && wxid) {
+        // 真正登录成功（有wxid）
+        data = {
+          Success: true,
+          Data: {
+            acctSectResp: {
+              userName: wxid,
+              nickName: nickname,
             },
-          }
+          },
         }
-        else if (result.code === -1 || result.code === -2 || (result.code === 0 && !wxid)) {
-          // 等待扫码或等待确认，不是错误
-          // 注意：有些API在code===0但wxid为空时也表示等待中
-          data = {
-            Success: true,
-            Data: {
-              status: result.code === -2 ? 1 : 0, // -2表示已扫码待确认，-1表示等待扫码
-            },
-          }
-        }
-        else {
-          data = { Success: false, Message: result.msg || '登录检查失败' }
+      }
+      else if (result.code === -1 || result.code === -2 || (result.code === 0 && !wxid)) {
+        // 等待扫码或等待确认，不是错误
+        // 注意：有些API在code===0但wxid为空时也表示等待中
+        data = {
+          Success: true,
+          Data: {
+            status: result.code === -2 ? 1 : 0, // -2表示已扫码待确认，-1表示等待扫码
+          },
         }
       }
       else {
-        // 使用本地 API 模式（原有逻辑）
-        const response = await fetch(`${config.value.apiBase}/Login/LoginCheckQR?uuid=${uuid.value}`, {
-          method: 'POST',
-        })
-        data = await response.json()
+        data = { Success: false, Message: result.msg || '登录检查失败' }
       }
 
       const acctResp = data?.Data?.acctSectResp || data?.Data?.AcctSectResp
@@ -268,41 +244,26 @@ export const useWxLoginStore = defineStore('wx-login', () => {
     try {
       let data: any
 
-      if (useProxyMode.value) {
-        // 使用代理模式（vxcode 逻辑）- 请求本地后端代理接口
-        const response = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-proxy-api-key': config.value.apiKey,
-            'x-proxy-api-url': proxyApiUrl.value,
+      const response = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-proxy-api-key': config.value.apiKey,
+          'x-proxy-api-url': proxyApiUrl.value,
+        },
+        body: JSON.stringify({ action: 'jslogin', wxid: targetWxid }),
+      })
+      const result = await response.json()
+      if (result.code === 0 && result.data) {
+        data = {
+          Success: true,
+          Data: {
+            code: result.data.code,
           },
-          body: JSON.stringify({ action: 'jslogin', wxid: targetWxid }),
-        })
-        const result = await response.json()
-        if (result.code === 0 && result.data) {
-          data = {
-            Success: true,
-            Data: {
-              code: result.data.code,
-            },
-          }
-        }
-        else {
-          data = { Success: false, Message: result.msg || '获取Code失败' }
         }
       }
       else {
-        // 使用本地 API 模式（原有逻辑）
-        const response = await fetch(`${config.value.apiBase}/Wxapp/JSLogin`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            Wxid: wxid.value,
-            Appid: config.value.appId,
-          }),
-        })
-        data = await response.json()
+        data = { Success: false, Message: result.msg || '获取Code失败' }
       }
 
       if (data.Success && data.Data && data.Data.code) {
@@ -332,7 +293,6 @@ export const useWxLoginStore = defineStore('wx-login', () => {
     status,
     statusMessage,
     errorMessage,
-    qrEndpoint,
     currentUserId,
     useProxyMode,
     resetState,

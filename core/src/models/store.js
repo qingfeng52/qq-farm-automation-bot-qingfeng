@@ -6,6 +6,7 @@ const process = require('node:process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { getDataFile, ensureDataDir } = require('../config/runtime-paths');
+const { getDefaultSystemConfig } = require('../config/config');
 const { readTextFile, readJsonFile, writeJsonFileAtomic } = require('../services/json-db');
 
 const STORE_FILE = getDataFile('store.json');
@@ -1337,16 +1338,24 @@ function shouldShowAnnouncement(username) {
 }
 
 function getSystemConfig() {
-    return globalConfig.systemConfig ? { ...globalConfig.systemConfig } : null;
+    if (!globalConfig.systemConfig) return null;
+    const defaults = getDefaultSystemConfig();
+    return {
+        serverUrl: String(globalConfig.systemConfig.serverUrl || defaults.serverUrl).trim(),
+        clientVersion: String(globalConfig.systemConfig.clientVersion || defaults.clientVersion).trim(),
+        platform: String(globalConfig.systemConfig.platform || defaults.platform).trim(),
+        os: String(globalConfig.systemConfig.os || defaults.os).trim(),
+    };
 }
 
 function setSystemConfig(config) {
     if (!config || typeof config !== 'object') return null;
+    const defaults = getDefaultSystemConfig();
     globalConfig.systemConfig = {
-        serverUrl: String(config.serverUrl || '').trim(),
-        clientVersion: String(config.clientVersion || '').trim(),
-        platform: String(config.platform || 'qq').trim(),
-        os: String(config.os || 'iOS').trim(),
+        serverUrl: String(config.serverUrl || defaults.serverUrl).trim(),
+        clientVersion: String(config.clientVersion || defaults.clientVersion).trim(),
+        platform: String(config.platform || defaults.platform).trim(),
+        os: String(config.os || defaults.os).trim(),
     };
     saveGlobalConfig();
     return { ...globalConfig.systemConfig };
