@@ -8,7 +8,7 @@ const { getLevelExpProgress } = require('../config/gameConfig');
 const { getAutomation, getPreferredSeed, getConfigSnapshot, applyConfigSnapshot, getFertilizerBuyType, getFertilizerBuyCount } = require('../models/store');
 const { checkAndClaimEmails } = require('../services/email');
 const { getEmailDailyState } = require('../services/email');
-const { checkFarm, startFarmCheckLoop, stopFarmCheckLoop, refreshFarmCheckLoop, getLandsDetail, getAvailableSeeds, runFarmOperation, runSingleLandOperation, runFertilizerByConfig } = require('../services/farm');
+const { checkFarm, startFarmCheckLoop, stopFarmCheckLoop, refreshFarmCheckLoop, getAllLands, getLandsDetail, getAvailableSeeds, runFarmOperation, runSingleLandOperation, runFertilizerByConfig } = require('../services/farm');
 const { checkFriends, startFriendCheckLoop, stopFriendCheckLoop, refreshFriendCheckLoop, runBadOnceOnStartup, isHelpExpLimitReached, getFriendsList, getFriendLandsDetail, doFriendOperation } = require('../services/friend');
 const { getInteractRecords } = require('../services/interact');
 const { processInviteCodes } = require('../services/invite');
@@ -22,7 +22,7 @@ const { initStatusBar, setStatusPlatform, statusData } = require('../services/st
 const { setRecordGoldExpHook } = require('../services/status');
 const { cleanupTaskSystem, checkAndClaimTasks, getTaskClaimDailyState, getTaskDailyStateLikeApp, getGrowthTaskStateLikeApp } = require('../services/task');
 const { sellAllFruits, getBag, getBagItems, openFertilizerGiftPacksSilently } = require('../services/warehouse');
-const { connect, cleanup, getWs, getUserState, networkEvents } = require('../utils/network');
+const { connect, reconnect, cleanup, getWs, getUserState, networkEvents } = require('../utils/network');
 const { loadProto } = require('../utils/proto');
 const { setLogHook, log, toNum } = require('../utils/utils');
 
@@ -157,6 +157,32 @@ function startDailyRoutineTimer() {
         lastDailyRunDate = today;
         runDailyRoutines(true).catch(() => null);
     });
+}
+
+function stopIdleKeepAliveTimer() {
+    workerScheduler.clear('idle_keepalive_interval');
+}
+
+function startIdleKeepAliveTimer() {
+    stopIdleKeepAliveTimer();
+    workerScheduler.setIntervalTask('idle_keepalive_interval', 120 * 1000, async () => {
+        if (!loginReady) return;
+        try {
+            await getAllLands();
+            log('系统', '保活查询完成', {
+                module: 'system',
+                event: 'idle_keepalive',
+                result: 'ok',
+            });
+        } catch (e) {
+            log('系统', `保活查询失败: ${e.message}`, {
+                module: 'system',
+                event: 'idle_keepalive',
+                result: 'error',
+                error: e.message,
+            });
+        }
+    }, { preventOverlap: true });
 }
 
 function normalizeIntervalRangeSec(minSec, maxSec, fallbackSec) {
@@ -568,6 +594,7 @@ async function startBot(config) {
         startUnifiedScheduler();
         // 每日礼包/任务改为跨日调度，不在农场轮询内执行
         startDailyRoutineTimer();
+        startIdleKeepAliveTimer();
 
         // 立即发送一次状态
         syncStatus();
@@ -601,6 +628,7 @@ async function stopBot() {
     stopFarmCheckLoop();
     stopFriendCheckLoop();
     stopDailyRoutineTimer();
+    stopIdleKeepAliveTimer();
     cleanupTaskSystem();
     workerScheduler.clearAll();
     cleanup('停止账号', { disableReconnect: true });
@@ -610,12 +638,42 @@ async function stopBot() {
 }
 
 function onKickout(payload) {
+    const rawReason = payload && payload.reason ? payload.reason : '';
+    if (isSoftKickoutReason(rawReason)) {
+        log('系统', `检测到临时断线，准备自动重连。原因: ${rawReason}`);
+        pauseLoopsForReconnect();
+        workerScheduler.setTimeoutTask('kickout_reconnect', 1200, () => {
+            if (!isRunning) return;
+            reconnect(null);
+        });
+        return;
+    }
+
     const reason = payload && payload.reason ? payload.reason : '未知';
     log('系统', `检测到踢下线，准备自动停止账号。原因: ${reason}`);
     sendToMaster({ type: 'account_kicked', reason });
     workerScheduler.setTimeoutTask('kickout_stop', 200, () => {
         stopBot().catch(() => exitWorker(0));
     });
+}
+
+// Soft kickouts are temporary connection drops. Hard kickouts still stop the account.
+function isSoftKickoutReason(reason) {
+    const text = String(reason || '');
+    if (!text) return false;
+    if (/版本过低|客户端版本过低|封禁|冻结|禁止|风险|异常登录|被挤下线|其他设备|认证失败|无效|过期/i.test(text)) {
+        return false;
+    }
+    return /长时间未操作|断开链接|断开连接|重新登录|连接已断开|未操作/i.test(text);
+}
+
+function pauseLoopsForReconnect() {
+    loginReady = false;
+    stopUnifiedScheduler();
+    stopFarmCheckLoop();
+    stopFriendCheckLoop();
+    stopDailyRoutineTimer();
+    stopIdleKeepAliveTimer();
 }
 
 // 处理来自 Admin 面板的直接调用请求 (如: 购买种子、开关设置等)
@@ -832,3 +890,4 @@ function syncStatus() {
         sendToMaster({ type: 'status_sync', data: fullStats });
     }
 }
+
